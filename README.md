@@ -64,7 +64,7 @@ The following images show the progressive assembly of the TransitGuard enclosure
 ### 5. Quarter Assembly
 
 <p align="center">
-  <img src="/assets/images/quarter_assembly.jpg" width="450"><br/>
+  <img src="https://github.com/AnnRicJo/TransitGuard-An-Edge-Processed-Multi-Modal-Data-Logger/blob/main/assets/images/quarter%20assembly.jpg" width="450"><br/>
   <i>Early-stage enclosure assembly showing the integration of the TransitGuard hardware</i>
 </p>
 
