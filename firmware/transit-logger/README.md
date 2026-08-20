@@ -1,214 +1,527 @@
-# Transit Package Logger — MYOSA Mini Kit firmware
+# Transit Package Logger — Firmware
 
-PlatformIO / Arduino-framework firmware for an ESP32-based (MYOSA Mini Kit)
-transit-condition logger: deep-sleep event logging + an on-demand Wi-Fi
-"Web UI" configuration/download mode, OLED status display, buzzer
-feedback, and capacitive-touch tamper sensing on the box's foil lining.
+Firmware for the ESP32-based MYOSA Mini Kit used in the Transit Package Logger.
 
-## 1. Hardware on this build
+The firmware has two main operating modes:
 
-| Module                | Chip      | I2C addr | Library used                     |
-|------------------------|-----------|----------|-----------------------------------|
-| OLED display           | SSD1306   | `0x3C`   | Adafruit_SSD1306 / GFX            |
-| Light/Prox/Gesture     | APDS9960  | `0x39`   | Adafruit_APDS9960                 |
-| 6-axis accel/gyro      | MPU6050   | `0x69`   | Adafruit_MPU6050 (AD0 tied high)  |
-| Pressure/altitude/temp | BMP180    | `0x77`   | Adafruit_BMP085 (fixed address)   |
-| Buzzer                 | plain passive piezo, direct GPIO | — | bit-banged tone, `buzzer.cpp` |
+- **Low-power logging:** the ESP32 spends most of its time in deep sleep and wakes to record events or periodic sensor readings.
+- **Web UI:** the ESP32 creates its own Wi-Fi access point and hosts a browser dashboard for viewing sensor data, changing thresholds, downloading the CSV log, and preparing the device for the next transit.
 
-The ST6845-C charger module has **no digital interface** (LED-only
-charge indication) — battery state is measured by the ESP32 itself via
-an ADC + resistor divider.
+The firmware is written with **PlatformIO + Arduino framework**.
 
-### Temperature source
+---
 
-Three of these chips can report a temperature, so `sensors.cpp` picks
-the most trustworthy one automatically, in this priority order:
+## Hardware
 
-1. **BMP180** — purpose-built ambient temp/pressure sensor, no
-   significant self-heating. Used whenever present.
-2. **MPU6050** — its temp sensor exists for gyro drift compensation,
-   not ambient sensing, and sits next to an active gyro die, so it
-   reads a bit high. Used only if BMP180 isn't found.
-3. **ESP32 internal die sensor** — last-resort fallback; badly
-   self-heated by the WiFi radio, especially in Web UI/AP mode.
+| Component | Interface / Address | Purpose |
+|---|---|---|
+| MYOSA Mini Kit / ESP32-WROOM-32E | — | Main controller |
+| SSD1306 OLED | I2C `0x3C` | Status and package information |
+| APDS9960 | I2C `0x39` | Ambient-light measurement |
+| MPU6050 | I2C `0x69` | Motion/shock detection |
+| BMP180 | I2C `0x77` | Temperature and pressure |
+| Passive piezo buzzer | GPIO | Audible feedback and alerts |
+| Aluminium-foil tamper sensor | ESP32 Touch0 | Tamper detection |
+| LiPo battery | ADC through divider | Battery-voltage measurement |
+| MYOSA onboard LED | GPIO2 | Firmware status indication |
 
-## 2. Pin map
+### Current sensor configuration
 
-| Signal                         | GPIO | Notes                                  |
-|---------------------------------|------|-----------------------------------------|
-| I2C SDA / SCL                   | 21 / 22 | shared bus: OLED, APDS9960, MPU6050, BMP180 |
-| Button — mode switch             | 32   | **active-HIGH**: wired to 3.3V, internal pulldown |
-| Button — OLED display            | 33   | **active-HIGH**: wired to 3.3V, internal pulldown |
-| APDS9960 INT (active low, open-drain) | 25 | own dedicated EXT0 wake source   |
-| MPU6050 INT (active high, push-pull)  | 27 | shares EXT1 wake bank w/ buttons |
-| Capacitive tamper foil           | 4    | native ESP32 touch (Touch0)             |
-| Battery ADC (via 2:1 divider)    | 34   | ADC1, input-only pin                    |
-| Buzzer (passive piezo, direct)   | 19   | bit-banged square wave, no driver IC    |
-| Onboard blue LED                 | 2    | MYOSA motherboard default               |
+The final firmware uses the APDS9960 **only for ambient-light sensing**.
 
-None of these are strapping pins **except GPIO2** (the onboard LED). The
-real ESP32 strapping-pin set is `0/2/5/12/15` — GPIO4 (tamper touch) is
-*not* one of them, contrary to an earlier draft of this note. GPIO2
-being a strapping pin is fine here because the LED is a fixed feature
-of the MYOSA motherboard itself (not a wiring choice you're making),
-and a plain LED-to-GPIO2 doesn't disturb the boot-mode sampling on
-this board family. Just don't repurpose GPIO2 for anything that could
-pull it hard high/low externally at reset (e.g. a strong pull-up from
-another peripheral), or you risk intermittent boot failures.
+Proximity and gesture detection are disabled in the current implementation. The corresponding proximity/gesture functions remain in the code structure, but they are not active features.
 
-### ⚠️ Why the buttons must be wired active-HIGH
+Temperature is selected automatically:
 
-Classic ESP32 silicon only offers two modes for waking on multiple
-GPIOs at once (`EXT1`): *"wake if ALL selected pins are low"* or
-*"wake if ANY selected pin is high"* — never a per-pin mix. The
-MPU6050's interrupt line is active-HIGH by hardware default and shares
-this same wake bank with your two buttons, so the buttons have to be
-wired active-HIGH too (button between the GPIO and 3.3V, ESP32
-internal pulldown so idle=LOW/pressed=HIGH) to use `ANY_HIGH` mode.
-The APDS9960's interrupt is open-drain and can only ever be
-active-LOW, so it doesn't share this bank at all — it gets its own
-independent `EXT0` wake source instead. `BUTTON_ACTIVE_LOW` in
-`config.h` reflects this; don't flip it without also re-wiring the
-buttons, or wakeup will silently stop working as expected.
+1. BMP180 temperature, when the BMP180 is detected.
+2. MPU6050 internal temperature, if the BMP180 is unavailable.
+3. ESP32 internal temperature as the final fallback.
 
-One caveat to test on your actual board: combining `EXT0` + `EXT1` +
-touchpad + timer wakeup simultaneously is standard on modern ESP32
-silicon revisions (rev 3, which is what you'll get on any board sold
-today), but was restricted on very early rev-0/1 chips. Worth
-confirming on first bring-up.
+---
 
-## 3. Firmware architecture
+## Pinout
 
-```
-include/config.h     all pins + tunable constants (edit this first)
-include/settings.h   \  thresholds (incl. motion sensitivity) + Wi-Fi
-src/settings.cpp     /  creds, persisted in NVS
-include/rtc_time.h   \  software RTC (uses ESP32's own RTC domain,
-src/rtc_time.cpp     /  which survives deep sleep) + NTP sync
-include/buzzer.h     \  direct-GPIO bit-banged tone for the passive
-src/buzzer.cpp        /  piezo buzzer (no driver IC)
-include/sensors.h    \  APDS9960 (lux/proximity/gesture), MPU6050
-src/sensors.cpp      /  (accel/gyro/motion), BMP180 (pressure/altitude/
-                         temp), battery ADC, best-temperature selection
-include/tamper.h     \  capacitive tamper sense, latched in NVS so it
-src/tamper.cpp        /  survives even a battery pull
-include/event_log.h  \  CSV event log on LittleFS
-src/event_log.cpp    /
-include/display.h    \  SSD1306 OLED screens (post-boot sensor status,
-src/display.cpp      /  web-ui info, low-power display-button screen)
-include/webui.h      \  Wi-Fi AP + HTTP dashboard + captive-portal DNS
-src/webui.cpp         /  (status, settings, CSV download, reset, tamper-clear)
-src/main.cpp          orchestrates both modes + deep-sleep wake logic
+| Signal | GPIO | Notes |
+|---|---:|---|
+| I2C SDA | `21` | Shared by OLED, APDS9960, MPU6050 and BMP180 |
+| I2C SCL | `22` | Shared I2C bus |
+| Mode / UI button | `32` | Active-HIGH, internal pulldown |
+| Display button | `33` | Active-HIGH, internal pulldown |
+| APDS9960 INT | `25` | Reserved in the current hardware configuration; proximity interrupt is disabled |
+| MPU6050 INT | `27` | Motion/shock interrupt |
+| Tamper foil | `4` | ESP32 Touch0 |
+| Battery ADC | `34` | ADC input through a 2:1 resistor divider |
+| Buzzer | `19` | Passive piezo driven directly by GPIO |
+| Onboard LED | `2` | MYOSA status LED |
+
+### Button wiring
+
+Both buttons are **active-HIGH**:
+
+```text
+3.3V ──[ BUTTON ]── GPIO
+                     │
+                 internal
+                 pulldown
 ```
 
-### Mode 0 — Post-boot sensor status (cold power-on only)
-On a true power-on (not a deep-sleep wake), the OLED shows a boot
-splash, then a continuously-refreshing screen reporting whether each
-sensor (MPU6050 / BMP180 / APDS9960) was recognised on the I2C bus and
-is active, plus battery charge. This stays up indefinitely -- no
-timeout -- until the UI (mode) button is pressed, which starts Web UI
-mode.
+- Idle = `LOW`
+- Pressed = `HIGH`
 
-### Mode 1 — Web UI (access point)
-Started/stopped with the mode button. Brings up a Wi-Fi AP
-(`TransitLogger-xxxxxx` / see `config.h` for default password --
-**change it**), plus a captive-portal DNS server and mDNS name
-(`http://transitlogger.local`) so you don't have to type the AP's IP.
-The OLED shows a persistent screen: the URL to open, a "WEB UI MODE"
-indicator, battery, and time. Serves a dashboard with:
-- live sensor readouts (light/proximity/battery/temp/pressure/shock,
-  polled via `/status` JSON every 3s)
-- threshold settings form (lux / proximity / temperature / motion
-  sensitivity) and the **logging interval** (seconds between recorded
-  sensor-data rows)
-- a "home Wi-Fi" field for briefly joining a known network (AP+STA) to
-  fetch NTP time
-- **Download CSV** button (streams `/events.csv` from LittleFS)
-- **Reset for next transit** button (wipes the log, keeps thresholds)
-- tamper banner + one-click acknowledge/clear
+This polarity is required by the current deep-sleep `EXT1` wake configuration, which uses `ANY_HIGH` for the buttons and MPU6050 interrupt.
 
-Hitting **Save & Start logging** commits the settings and immediately
-drops the device into low-power (deep-sleep) mode -- same effect as
-the separate "Go to sleep now" button or the physical mode button.
+---
 
-### Mode 2 — Logging (deep sleep / "low power mode")
-Wakes on: APDS9960 interrupt (EXT0), either button OR the MPU6050
-motion/shock interrupt (shared EXT1 bank), the tamper touch pad, or the
-user-configured logging-interval timer (`loggingIntervalSec`, set from
-the Web UI, default `DEFAULT_LOGGING_INTERVAL_SEC` = 600s). Data is
-recorded at that interval, or immediately whenever a threshold
-interrupt fires (motion/proximity), or on a lux/temperature threshold
-crossing detected on wake -- then goes straight back to sleep, with no
-OLED feedback, unless:
-- the **UI (mode) button** was pressed: switches back into Web UI mode
-  (same screen as above).
-- the **display button** was pressed: shows battery, time, and the
-  package's safety status (threshold breaches + tamper) for exactly
-  5 seconds. If anything is breached, the buzzer sounds continuously
-  for as long as the screen is up. The display button is only
-  meaningful in this mode -- it's inert while Web UI mode is active.
+## Firmware behaviour
 
-Per your spec, the buzzer **only sounds a threshold-breach alert while
-the OLED is actively showing something** -- silent background wakes
-never buzz, even if a threshold was crossed. Button presses always get
-a short confirmation beep regardless of mode.
+### 1. Power-on
 
-## 4. Things you should double check / decide before flashing
+After a true power-on:
 
-1. **Motion/shock sensitivity** (`motionThreshold` in Settings, default
-   `MPU_MOTION_THRESHOLD_DEFAULT = 8`) — this is very sensitive by
-   datasheet convention (1=most sensitive). Tune it on the bench with
-   the box's actual internal cushioning/packing material, or you'll
-   get a flood of `MOTION` events from ordinary vehicle vibration.
-   Adjustable live from the Web UI settings form.
-2. **Logging interval** (`loggingIntervalSec` in Settings, default
-   `DEFAULT_LOGGING_INTERVAL_SEC = 600` seconds) — how often a sensor
-   snapshot is recorded even with no interrupt. Adjustable from the
-   Web UI, clamped to `MIN_LOGGING_INTERVAL_SEC`..`MAX_LOGGING_INTERVAL_SEC`
-   in `config.h`. A threshold breach or motion/proximity interrupt
-   still logs immediately regardless of this interval.
-3. **Battery divider ratio** (`BATT_DIVIDER_RATIO` in config.h) —
-   set this to match whatever resistor divider you actually build
-   between the battery and GPIO34; the default assumes a 2:1 (equal
-   resistor) divider.
-4. **Tamper sensitivity** (`TAMPER_ALLOWED_DELTA` in `tamper.cpp`) —
-   touch readings are sensitive to foil geometry/humidity; calibrate
-   on your actual assembled box and tune this margin.
-5. **AP password** — change `DEFAULT_AP_PASSWORD` in config.h before
-   deploying; the dashboard currently has no login of its own.
-6. **LittleFS size** — bump `board_build.partitions` to a custom table
-   if you expect very long transits with frequent events.
-7. **Buzzer volume/tone** — `BUZZER_TONE_HZ` (2700 Hz default) is a
-   generic guess at a piezo's resonant peak; sweep it on the bench and
-   pick whatever your specific buzzer is loudest at.
+1. The OLED displays the Transit Logger boot screen.
+2. The firmware initialises the sensors, display, filesystem, battery measurement and tamper system.
+3. A short buzzer confirmation is given.
+4. The OLED continuously displays sensor detection status and battery level.
+5. Pressing the **Mode / UI button** enters Web UI mode.
 
-## 5. No more typing the IP address
+The sensor-status screen does **not** automatically time out.
 
-`webui.cpp` runs a captive-portal-style DNS server (`DNSServer`, port
-53) alongside the HTTP server: it answers *every* hostname lookup with
-the AP's own IP, and any unmatched HTTP path 302-redirects back to
-`/`. In practice:
+---
 
-- Most phones/laptops will auto-pop the dashboard as a "sign in to
-  network" prompt the moment they join the AP (same mechanism as
-  hotel/airport Wi-Fi).
-- If it doesn't auto-pop, just type anything into the address bar
-  (`transit`, `x`, `logger.com`) and it lands on the dashboard.
-- There's also a fixed mDNS name: `http://transitlogger.local`
-  (works out of the box on iOS/macOS/Android/most Linux; older
-  Windows needs Bonjour installed).
+### 2. Low-power logging mode
 
-No extra library needed — `DNSServer` and `ESPmDNS` both ship with the
-arduino-esp32 core already pulled in by `platformio.ini`.
+In logging mode, the OLED is normally off and the ESP32 enters deep sleep.
 
-## 6. Build & flash (PlatformIO)
+The device wakes from:
+
+- MPU6050 motion/shock interrupt
+- Mode button
+- Display button
+- Capacitive tamper wake
+- Configured periodic logging timer
+
+After waking, the firmware:
+
+1. Reads the available sensors.
+2. Determines the wake/event reason.
+3. Records the appropriate event in the CSV log.
+4. Checks tamper and light/temperature thresholds.
+5. Records a low-battery event if the battery is at or below 10%.
+6. Returns to deep sleep unless a button requests another mode.
+
+### Periodic logging
+
+The default logging interval is:
+
+```text
+600 seconds (10 minutes)
+```
+
+The interval can be changed from the Web UI and is limited to:
+
+```text
+30 seconds – 86400 seconds
+```
+
+A periodic wake records a sensor snapshot even when no other event has occurred.
+
+---
+
+## Motion / shock detection
+
+The MPU6050 is configured for motion detection using its hardware interrupt.
+
+Current configuration:
+
+- Accelerometer range: **±8 g**
+- Gyroscope range: **±500 °/s**
+- Filter bandwidth: **21 Hz**
+- Motion threshold: configurable, default `8`
+- Motion duration: `20` samples
+- Interrupt: GPIO `27`
+
+The motion sensitivity can be changed from the Web UI.
+
+The firmware also records the current acceleration magnitude in `g`.
+
+> The motion threshold should be tested with the final enclosure and packing material because normal transport vibration can generate motion events.
+
+---
+
+## Tamper detection
+
+The aluminium-foil lining is connected to the ESP32's capacitive-touch input on **GPIO4 / Touch0**.
+
+On the first setup, the firmware takes an averaged baseline from 10 touch readings.
+
+A significant deviation from that baseline is treated as tampering.
+
+The tamper state is **latched in ESP32 NVS**, meaning it remains recorded until explicitly cleared from the Web UI.
+
+Tamper can therefore remain recorded even after a reset or battery removal.
+
+### Initial calibration
+
+The first calibration should be performed with the box in its normal sealed configuration and without touching the foil.
+
+The allowed deviation is currently defined in `src/tamper.cpp`:
+
+```cpp
+#define TAMPER_ALLOWED_DELTA 20
+```
+
+This value may need to be tuned for the final enclosure and foil geometry.
+
+---
+
+## Battery monitoring
+
+The charger module does not provide digital battery telemetry.
+
+Battery voltage is therefore measured by the ESP32 through:
+
+- ADC pin: `GPIO34`
+- Resistor divider: `2:1`
+- ADC reference used by firmware: `3.3 V`
+
+The firmware maps:
+
+```text
+4.2 V → 100%
+3.3 V → 0%
+```
+
+The battery percentage shown by the firmware is therefore a voltage-based estimate rather than a fuel-gauge measurement.
+
+If the actual resistor divider differs from the current design, update:
+
+```cpp
+BATT_DIVIDER_RATIO
+```
+
+in `include/config.h`.
+
+---
+
+## OLED displays
+
+The SSD1306 OLED uses I2C address `0x3C`.
+
+The firmware has four main display states:
+
+### Boot screen
+
+Shown briefly after power-on.
+
+### Sensor status
+
+Shown continuously after a true power-on until the Mode button is pressed.
+
+It shows:
+
+- MPU6050 status
+- BMP180 status
+- APDS9960 status
+- Battery voltage and percentage
+
+### Web UI mode
+
+Shows:
+
+- Web UI mode indicator
+- `transitlogger.local`
+- Battery voltage and percentage
+- Device time
+
+### Low-power information screen
+
+Pressing the Display button during logging mode wakes the OLED for **5 seconds**.
+
+It shows:
+
+- Battery status
+- Device time
+- Package safety status
+- Tamper / light / temperature alerts when applicable
+
+The Display button has no function while Web UI mode is active.
+
+---
+
+## Buzzer and status LED
+
+### Buzzer
+
+The passive piezo buzzer is connected directly to GPIO19.
+
+A short beep confirms button/actions.
+
+Alert beeps are produced when an applicable threshold or tamper condition is active **while the OLED is being shown**.
+
+Background deep-sleep logging does not continuously sound the buzzer.
+
+### Onboard LED
+
+GPIO2 is used as the MYOSA status LED:
+
+| State | LED |
+|---|---|
+| Deep-sleep logging | OFF |
+| Wake/event activity | Brief blink |
+| Web UI mode | Solid ON |
+| Tamper latched in Web UI | Fast blink |
+
+---
+
+# Web UI
+
+Press the **Mode / UI button** to enter Web UI mode.
+
+The ESP32 creates a Wi-Fi access point using the configured SSID and password.
+
+The default SSID prefix is:
+
+```text
+TransitLogger-
+```
+
+The last three bytes of the ESP32 MAC address are appended to make the default SSID unique.
+
+The default AP password is defined in:
+
+```text
+include/config.h
+```
+
+**Change the default password before deployment.**
+
+## Opening the dashboard
+
+After connecting to the ESP32's Wi-Fi network, open:
+
+```text
+http://transitlogger.local
+```
+
+The firmware also runs a captive-portal-style DNS server, so opening another address in the browser can redirect to the dashboard.
+
+If automatic captive-portal detection does not appear, use the `transitlogger.local` address.
+
+---
+
+## Dashboard functions
+
+The Web UI provides:
+
+### Live sensor data
+
+- Ambient light
+- Battery voltage and percentage
+- Temperature
+- Pressure
+- Acceleration magnitude
+- Device time
+- Number of logged events
+- Tamper status
+
+The live status is refreshed approximately every **3 seconds**.
+
+### Threshold configuration
+
+The following values can be changed:
+
+- Ambient-light threshold
+- Temperature threshold
+- MPU6050 motion sensitivity
+- Logging interval
+
+These settings are stored in ESP32 NVS and survive resets.
+
+### Time synchronisation
+
+The dashboard includes **Sync time with this device**.
+
+This sends the browser's current Unix time and timezone offset to the ESP32.
+
+The firmware does **not** currently perform an automatic NTP connection. Time synchronisation is performed through the Web UI.
+
+### CSV download
+
+The current event log can be downloaded from the dashboard as:
+
+```text
+transit_log.csv
+```
+
+### Reset for next transit
+
+The reset function clears the existing event log and creates a new log beginning with a `LOG_RESET` event.
+
+### Return to low-power mode
+
+The Web UI provides a **Go to sleep now** button.
+
+Pressing the physical Mode button has the same effect.
+
+Saving the logging settings also returns the device to low-power logging mode.
+
+---
+
+# Event logging
+
+Events are stored in:
+
+```text
+/events.csv
+```
+
+on the ESP32's LittleFS filesystem.
+
+The CSV format is:
+
+```csv
+timestamp,event_type,value1,value2,value3,note
+```
+
+Possible event types currently defined by the firmware include:
+
+- `BOOT`
+- `PERIODIC`
+- `PROXIMITY`
+- `LIGHT_THRESHOLD`
+- `GESTURE`
+- `TEMP_THRESHOLD`
+- `TAMPER`
+- `MODE_CHANGE`
+- `BUTTON_DISPLAY`
+- `LOG_RESET`
+- `LOW_BATTERY`
+- `MOTION`
+
+`PROXIMITY` and `GESTURE` event types remain defined for compatibility with the event system, but the corresponding APDS9960 features are disabled in the current firmware.
+
+Light and temperature threshold events are logged on the transition into a breached state rather than repeatedly logging the same continuous breach.
+
+---
+
+# Project structure
+
+```text
+transit-logger/
+├── include/
+│   ├── buzzer.h
+│   ├── config.h
+│   ├── display.h
+│   ├── event_log.h
+│   ├── rtc_time.h
+│   ├── sensors.h
+│   ├── settings.h
+│   ├── tamper.h
+│   └── webui.h
+│
+├── src/
+│   ├── buzzer.cpp
+│   ├── config.cpp
+│   ├── display.cpp
+│   ├── event_log.cpp
+│   ├── main.cpp
+│   ├── rtc_time.cpp
+│   ├── sensors.cpp
+│   ├── settings.cpp
+│   ├── tamper.cpp
+│   └── webui.cpp
+│
+├── lib/
+│   ├── Adafruit APDS9960 Library/
+│   ├── Adafruit BMP085 Library/
+│   └── Adafruit MPU6050/
+│
+├── platformio.ini
+└── README.md
+```
+
+---
+
+# Build and upload
+
+Install **PlatformIO** and open the `transit-logger` directory as the PlatformIO project.
+
+The project targets an ESP32-compatible `esp32dev` board definition with the Arduino framework.
+
+### Build
 
 ```bash
-pio run                     # build
-pio run --target upload     # flash
-pio device monitor           # serial log (115200 baud)
+pio run
 ```
 
-First boot formats LittleFS automatically and takes the initial
-tamper-sensor calibration baseline — do this with the box in its
-final sealed, untouched state.
+### Upload
+
+```bash
+pio run --target upload
+```
+
+### Serial monitor
+
+```bash
+pio device monitor
+```
+
+Serial communication is configured for:
+
+```text
+115200 baud
+```
+
+---
+
+# Important configuration
+
+Most hardware-dependent settings are in:
+
+```text
+include/config.h
+```
+
+Before deploying, verify:
+
+- I2C wiring
+- Button wiring and polarity
+- MPU6050 interrupt wiring
+- Battery-divider ratio
+- Tamper foil calibration
+- Motion sensitivity
+- Logging interval
+- Default Wi-Fi password
+- Buzzer behaviour
+
+The firmware currently uses the standard PlatformIO `default.csv` partition layout with LittleFS enabled.
+
+---
+
+## Libraries
+
+The project uses the Arduino framework and the following libraries:
+
+- Adafruit SSD1306
+- Adafruit GFX Library
+- Adafruit BusIO
+- Adafruit Unified Sensor
+- Adafruit APDS9960
+- Adafruit BMP085 / BMP180
+- Adafruit MPU6050
+- ESP32 Preferences
+- ESP32 Wi-Fi / WebServer / DNSServer / mDNS
+- LittleFS
+
+The APDS9960, BMP085 and MPU6050 libraries are included under the project's `lib/` directory.
+
+---
+
+## Notes
+
+- The firmware is specifically matched to the current pin assignments and hardware configuration documented above.
+- The APDS9960 is currently used only as an ambient-light sensor.
+- The device spends most of its time in ESP32 deep sleep during logging.
+- Thresholds and logging settings are stored in NVS.
+- Event data is stored locally in LittleFS and can be downloaded through the Web UI.
+- Time must currently be synchronised through the Web UI; there is no automatic NTP routine in the current firmware.
