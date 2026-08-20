@@ -3,76 +3,79 @@
 #include "rtc_time.h"
 #include <LittleFS.h>
 
-EventLogger EventLog;
+EventLogManager EventLog;
 
-bool EventLogger::begin() {
-    if (!LittleFS.begin(true /* formatOnFail */)) {
-        Serial.println(F("[EventLog] LittleFS mount FAILED"));
-        _ready = false;
+bool EventLogManager::begin() {
+    if (!LittleFS.begin(true)) {
         return false;
     }
-
-    if (!LittleFS.exists(LOG_FILE_PATH)) {
-        File f = LittleFS.open(LOG_FILE_PATH, "w");
-        if (f) {
-            f.print(LOG_CSV_HEADER);
-            f.close();
-        }
-    }
-    _ready = true;
+    initHeader();
     return true;
 }
 
-void EventLogger::logEvent(uint8_t eventType, float v1, float v2, float v3, const char *note) {
-    if (!_ready) return;
+void EventLogManager::initHeader() {
+    if (!LittleFS.exists(LOG_FILE_PATH)) {
+        File f = LittleFS.open(LOG_FILE_PATH, "w");
+        if (f) {
+            f.println("timestamp,event_type,lux,temp_c,press_hpa,accel_x,accel_y,accel_z,mag_g,pitch,roll,orientation,batt_pct,note");
+            f.close();
+        }
+    }
+}
 
+const char* EventLogManager::eventTypeToString(EventType evt) {
+    switch (evt) {
+        case EVT_BOOT:            return "BOOT";
+        case EVT_PERIODIC:        return "PERIODIC";
+        case EVT_MOTION:          return "MOTION";
+        case EVT_TAMPER:          return "TAMPER";
+        case EVT_LIGHT_THRESHOLD: return "LIGHT_ALERT";
+        case EVT_TEMP_THRESHOLD:  return "TEMP_ALERT";
+        case EVT_LOW_BATTERY:     return "LOW_BATTERY";
+        case EVT_MODE_CHANGE:     return "MODE_CHANGE";
+        case EVT_BUTTON_DISPLAY:  return "BUTTON_DISPLAY";
+        case EVT_LOG_RESET:       return "LOG_RESET";
+        default:                  return "UNKNOWN";
+    }
+}
+
+void EventLogManager::logEvent(EventType evt, const SensorReadings &r, const char *note) {
     File f = LittleFS.open(LOG_FILE_PATH, "a");
-    if (!f) {
-        Serial.println(F("[EventLog] append open FAILED"));
-        return;
-    }
+    if (!f) return;
 
-    f.print(RtcTime.nowFormatted());
-    f.print(',');
-    f.print(eventTypeToStr(eventType));
-    f.print(',');
-    f.print(v1, 2);
-    f.print(',');
-    f.print(v2, 2);
-    f.print(',');
-    f.print(v3, 2);
-    f.print(',');
-    f.println(note);
-
+    f.printf("%s,%s,%.1f,%.1f,%.1f,%.2f,%.2f,%.2f,%.2f,%.1f,%.1f,%s,%u,%s\n",
+             RtcTime.nowFormatted().c_str(),
+             eventTypeToString(evt),
+             r.ambientLux,
+             r.temperatureC,
+             r.pressureHPa,
+             r.accelX,
+             r.accelY,
+             r.accelZ,
+             r.accelMagnitude_g,
+             r.pitchDeg,
+             r.rollDeg,
+             r.orientation,
+             r.batteryPercent,
+             note ? note : "");
     f.close();
 }
 
-void EventLogger::resetLog() {
-    if (!_ready) return;
+void EventLogManager::resetLog() {
     LittleFS.remove(LOG_FILE_PATH);
-    File f = LittleFS.open(LOG_FILE_PATH, "w");
-    if (f) {
-        f.print(LOG_CSV_HEADER);
-        f.close();
-    }
-    logEvent(EVT_LOG_RESET, 0, 0, 0, "new-transit-started");
+    initHeader();
+    SensorReadings r = Sensors.readAll();
+    logEvent(EVT_LOG_RESET, r, "new-transit-started");
 }
 
-size_t EventLogger::fileSizeBytes() {
-    if (!_ready || !LittleFS.exists(LOG_FILE_PATH)) return 0;
+size_t EventLogManager::entryCount() {
+    if (!LittleFS.exists(LOG_FILE_PATH)) return 0;
     File f = LittleFS.open(LOG_FILE_PATH, "r");
-    size_t sz = f.size();
-    f.close();
-    return sz;
-}
-
-size_t EventLogger::entryCount() {
-    if (!_ready || !LittleFS.exists(LOG_FILE_PATH)) return 0;
-    File f = LittleFS.open(LOG_FILE_PATH, "r");
+    if (!f) return 0;
     size_t lines = 0;
     while (f.available()) {
         if (f.read() == '\n') lines++;
     }
     f.close();
-    return (lines > 0) ? (lines - 1) : 0; /* minus header line */
+    return (lines > 1) ? (lines - 1) : 0;
 }

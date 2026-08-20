@@ -1,30 +1,18 @@
 #pragma once
-/* =====================================================================
- *  event_log.h
- *  --------------------------------------------------------------
- *  Appends timestamped events to a CSV file on LittleFS. This is the
- *  file the Web UI serves for download, and "reset for next transit"
- *  just truncates it back to a fresh header.
- * =====================================================================
- */
 #include <Arduino.h>
+#include "config.h"
+#include "sensors.h"
 
-class EventLogger {
+class EventLogManager {
 public:
-    bool begin();     /* mounts LittleFS, creates file+header if missing */
-
-    void logEvent(uint8_t eventType, float v1 = 0, float v2 = 0, float v3 = 0,
-                  const char *note = "");
-
-    /* Wipes the log and starts a fresh CSV -- used by "reset for next
-     * transit" in the Web UI. */
+    bool begin();
+    void logEvent(EventType evt, const SensorReadings &r, const char *note = "");
     void resetLog();
-
-    size_t fileSizeBytes();
-    size_t entryCount();  /* approx, counts newlines minus header */
+    size_t entryCount();
+    const char* eventTypeToString(EventType evt);
 
 private:
-    bool _ready = false;
+    void initHeader();
 };
 
-extern EventLogger EventLog;
+extern EventLogManager EventLog;

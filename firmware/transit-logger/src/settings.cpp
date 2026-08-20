@@ -1,90 +1,95 @@
 #include "settings.h"
-#include "config.h"
 #include <Preferences.h>
 
-SettingsManager Settings;   /* single global instance used across the app */
-
+SettingsManager Settings;
 static Preferences prefs;
-static const char *NVS_NAMESPACE = "translogger";
 
-void SettingsManager::load() {
-    prefs.begin(NVS_NAMESPACE, /*readOnly=*/true);
+void SettingsManager::loadDefaults() {
+    strncpy(_settings.apSsid, "TransitLogger-AP", sizeof(_settings.apSsid));
+    strncpy(_settings.apPass, "12345678", sizeof(_settings.apPass));
+    _settings.threshLux = 50.0f;
+    _settings.threshTempC = 45.0f;
+    _settings.motionThreshold = 20;
+    _settings.loggingIntervalSec = 60;
 
-    _settings.threshLux      = prefs.getFloat("lux",  DEFAULT_THRESH_LUX);
-    _settings.threshProximity= prefs.getFloat("prox", DEFAULT_THRESH_PROX);
-    _settings.threshTempC    = prefs.getFloat("temp", DEFAULT_THRESH_TEMP_C);
-    _settings.motionThreshold= prefs.getUChar("motion", MPU_MOTION_THRESHOLD_DEFAULT);
-    _settings.loggingIntervalSec = prefs.getULong("logIntvl", DEFAULT_LOGGING_INTERVAL_SEC);
+    _settings.threshAccelX = 2.0f; // 2.0g default
+    _settings.threshAccelY = 2.0f;
+    _settings.threshAccelZ = 2.5f;
+    _settings.threshPitch  = 45.0f; // 45 deg tilt default
+    _settings.threshRoll   = 45.0f;
 
-    prefs.getString("hSsid", _settings.homeWifiSsid, sizeof(_settings.homeWifiSsid));
-    prefs.getString("hPass", _settings.homeWifiPass, sizeof(_settings.homeWifiPass));
-
-    /* Default AP SSID includes the last 3 bytes of the MAC for uniqueness */
-    String defaultApSsid = String(DEFAULT_AP_SSID_PREFIX) + String((uint32_t)(ESP.getEfuseMac() & 0xFFFFFF), HEX);
-    String storedApSsid = prefs.getString("aSsid", defaultApSsid);
-    String storedApPass = prefs.getString("aPass", DEFAULT_AP_PASSWORD);
-    storedApSsid.toCharArray(_settings.apSsid, sizeof(_settings.apSsid));
-    storedApPass.toCharArray(_settings.apPass, sizeof(_settings.apPass));
-
-    prefs.end();
+    _settings.calibOffsetX = 0.0f;
+    _settings.calibOffsetY = 0.0f;
+    _settings.calibOffsetZ = 0.0f;
 }
 
-void SettingsManager::save() {
-    prefs.begin(NVS_NAMESPACE, /*readOnly=*/false);
-    prefs.putFloat("lux",  _settings.threshLux);
-    prefs.putFloat("prox", _settings.threshProximity);
-    prefs.putFloat("temp", _settings.threshTempC);
-    prefs.putUChar("motion", _settings.motionThreshold);
-    prefs.putULong("logIntvl", _settings.loggingIntervalSec);
-    prefs.putString("hSsid", _settings.homeWifiSsid);
-    prefs.putString("hPass", _settings.homeWifiPass);
-    prefs.putString("aSsid", _settings.apSsid);
-    prefs.putString("aPass", _settings.apPass);
-    prefs.end();
+bool SettingsManager::begin() {
+    prefs.begin("settings", false);
+    loadDefaults();
+
+    _settings.threshLux           = prefs.getFloat("lux", _settings.threshLux);
+    _settings.threshTempC         = prefs.getFloat("temp", _settings.threshTempC);
+    _settings.motionThreshold     = prefs.getUChar("motion", _settings.motionThreshold);
+    _settings.loggingIntervalSec  = prefs.getULong("interval", _settings.loggingIntervalSec);
+
+    _settings.threshAccelX        = prefs.getFloat("th_ax", _settings.threshAccelX);
+    _settings.threshAccelY        = prefs.getFloat("th_ay", _settings.threshAccelY);
+    _settings.threshAccelZ        = prefs.getFloat("th_az", _settings.threshAccelZ);
+    _settings.threshPitch         = prefs.getFloat("th_pitch", _settings.threshPitch);
+    _settings.threshRoll          = prefs.getFloat("th_roll", _settings.threshRoll);
+
+    _settings.calibOffsetX        = prefs.getFloat("cal_x", 0.0f);
+    _settings.calibOffsetY        = prefs.getFloat("cal_y", 0.0f);
+    _settings.calibOffsetZ        = prefs.getFloat("cal_z", 0.0f);
+    return true;
 }
 
-void SettingsManager::begin() {
-    load();
-}
-
-void SettingsManager::setThresholds(float lux, float prox, float tempC) {
+void SettingsManager::setBasicThresholds(float lux, float temp) {
     _settings.threshLux = lux;
-    _settings.threshProximity = prox;
-    _settings.threshTempC = tempC;
+    _settings.threshTempC = temp;
     save();
 }
 
-void SettingsManager::setMotionThreshold(uint8_t thr) {
-    _settings.motionThreshold = thr;
+void SettingsManager::setDirectionalThresholds(float ax, float ay, float az, float pitch, float roll) {
+    _settings.threshAccelX = ax;
+    _settings.threshAccelY = ay;
+    _settings.threshAccelZ = az;
+    _settings.threshPitch  = pitch;
+    _settings.threshRoll   = roll;
+    save();
+}
+
+void SettingsManager::setMotionThreshold(uint8_t m) {
+    _settings.motionThreshold = m;
     save();
 }
 
 void SettingsManager::setLoggingInterval(uint32_t sec) {
-    if (sec < MIN_LOGGING_INTERVAL_SEC) sec = MIN_LOGGING_INTERVAL_SEC;
-    if (sec > MAX_LOGGING_INTERVAL_SEC) sec = MAX_LOGGING_INTERVAL_SEC;
     _settings.loggingIntervalSec = sec;
     save();
 }
 
-void SettingsManager::setHomeWifi(const char *ssid, const char *pass) {
-    strncpy(_settings.homeWifiSsid, ssid, sizeof(_settings.homeWifiSsid) - 1);
-    _settings.homeWifiSsid[sizeof(_settings.homeWifiSsid) - 1] = '\0';
-    strncpy(_settings.homeWifiPass, pass, sizeof(_settings.homeWifiPass) - 1);
-    _settings.homeWifiPass[sizeof(_settings.homeWifiPass) - 1] = '\0';
+
+void SettingsManager::setCalibrationOffsets(float ox, float oy, float oz) {
+    _settings.calibOffsetX = ox;
+    _settings.calibOffsetY = oy;
+    _settings.calibOffsetZ = oz;
     save();
 }
 
-void SettingsManager::setApCredentials(const char *ssid, const char *pass) {
-    strncpy(_settings.apSsid, ssid, sizeof(_settings.apSsid) - 1);
-    _settings.apSsid[sizeof(_settings.apSsid) - 1] = '\0';
-    strncpy(_settings.apPass, pass, sizeof(_settings.apPass) - 1);
-    _settings.apPass[sizeof(_settings.apPass) - 1] = '\0';
-    save();
-}
+void SettingsManager::save() {
+    prefs.putFloat("lux", _settings.threshLux);
+    prefs.putFloat("temp", _settings.threshTempC);
+    prefs.putUChar("motion", _settings.motionThreshold);
+    prefs.putULong("interval", _settings.loggingIntervalSec);
 
-void SettingsManager::resetToDefaults() {
-    prefs.begin(NVS_NAMESPACE, false);
-    prefs.clear();
-    prefs.end();
-    load();
+    prefs.putFloat("th_ax", _settings.threshAccelX);
+    prefs.putFloat("th_ay", _settings.threshAccelY);
+    prefs.putFloat("th_az", _settings.threshAccelZ);
+    prefs.putFloat("th_pitch", _settings.threshPitch);
+    prefs.putFloat("th_roll", _settings.threshRoll);
+
+    prefs.putFloat("cal_x", _settings.calibOffsetX);
+    prefs.putFloat("cal_y", _settings.calibOffsetY);
+    prefs.putFloat("cal_z", _settings.calibOffsetZ);
 }

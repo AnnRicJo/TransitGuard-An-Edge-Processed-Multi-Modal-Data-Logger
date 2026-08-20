@@ -42,6 +42,7 @@ private:
     static void handleTamperClear();
     static void handleSleep();
     static void handleNotFound();
+    static void handleCalibrate();  
 };
 
 extern WebUiServer WebUi;

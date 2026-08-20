@@ -89,48 +89,34 @@ void setup() {
     delay(50);
 
     initCommonPeripherals();
-    statusLedWakeBlink();   /* brief heartbeat flash so a live unit visibly
-                              "did something" on every wake, without
-                              leaving the LED burning power during sleep */
+    statusLedWakeBlink();
 
     bool firstBoot = (g_bootCount == 0);
     g_bootCount++;
 
     if (firstBoot) {
         Display.drawBootSplash();
-        EventLog.logEvent(EVT_BOOT, 0, 0, 0, "power-on");
+        SensorReadings r = Sensors.readAll();
+        EventLog.logEvent(EVT_BOOT, r, "power-on");
         BuzzerDev.beepShort();
         delay(1200);
-
-        /* Continuous sensor-recognition + battery screen. Blocks here
-         * by design until the UI (mode) button is pressed -- only runs
-         * on a true cold power-on, never on a deep-sleep wake, since
-         * g_bootCount (RTC memory) survives deep sleep but resets on
-         * power-on. May set g_mode = MODE_WEBUI before returning. */
         runInitialSensorStatusLoop();
     }
-
-    if (g_mode == MODE_WEBUI) {
-        /* Either the UI button was just pressed above, or we were
-         * already in Web UI mode before this reset/boot (e.g. a
-         * watchdog reset while the dashboard was open) -- either way,
-         * just (re)start it. */
-        enterWebUiMode();
-        return; /* loop() takes over servicing the web server */
-    }
-
-    /* ---- MODE_LOGGING path ---------------------------------------- */
-    handleWakeAndLog();
-    runLoggingModeActiveWindow();  /* may switch g_mode to WEBUI */
 
     if (g_mode == MODE_WEBUI) {
         enterWebUiMode();
         return;
     }
 
-    /* Still in logging mode -> go straight back to sleep */
+    handleWakeAndLog();
+    runLoggingModeActiveWindow();
+
+    if (g_mode == MODE_WEBUI) {
+        enterWebUiMode();
+        return;
+    }
+
     goToDeepSleep();
-    /* never reached */
 }
 
 void loop() {
@@ -270,54 +256,45 @@ static void statusLedServiceTamperBlink(bool tampered) {
 static void handleWakeAndLog() {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     SensorReadings r = Sensors.readAll();
+    const DeviceSettings &s = Settings.get();
 
     switch (cause) {
-        case ESP_SLEEP_WAKEUP_EXT0: {
-            /* Dedicated wake source for the APDS9960's active-low,
-             * open-drain interrupt line. */
-            String gesture = Sensors.pollGesture();
-            if (gesture.length() > 0) {
-                EventLog.logEvent(EVT_GESTURE, r.ambientLux, r.proximity, 0, gesture.c_str());
-            } else {
-                EventLog.logEvent(EVT_PROXIMITY, r.proximity, r.ambientLux, 0, "apds-int");
-            }
-            break;
-        }
         case ESP_SLEEP_WAKEUP_EXT1: {
             uint64_t status = esp_sleep_get_ext1_wakeup_status();
             if (status & (1ULL << MPU_INT_PIN)) {
-                EventLog.logEvent(EVT_MOTION, r.accelMagnitude_g, 0, 0, "mpu-motion-int");
+                // Dynamic shock magnitude (excess over 1g)
+                float dynamicShock = fabsf(r.accelMagnitude_g - 1.0f);
+                
+                // Only log if actual motion exceeds software threshold or directional limits
+                if (dynamicShock >= 0.3f || 
+                    fabsf(r.accelX) >= s.threshAccelX || 
+                    fabsf(r.accelY) >= s.threshAccelY || 
+                    fabsf(r.accelZ) >= s.threshAccelZ) {
+                    EventLog.logEvent(EVT_MOTION, r, "mpu-motion-int");
+                }
                 Sensors.clearMotionInterrupt();
             }
-            /* Button-triggered wakes are logged as part of
-             * runLoggingModeActiveWindow()'s own button handling, not
-             * here, to avoid double-logging. */
             break;
         }
         case ESP_SLEEP_WAKEUP_TOUCHPAD:
-            EventLog.logEvent(EVT_TAMPER, Tamper.lastRawValue(), 0, 0, "touch-wake");
+            EventLog.logEvent(EVT_TAMPER, r, "touch-wake");
             break;
         case ESP_SLEEP_WAKEUP_TIMER:
-            EventLog.logEvent(EVT_PERIODIC, r.ambientLux, r.proximity, r.temperatureC, "heartbeat");
+            EventLog.logEvent(EVT_PERIODIC, r, "heartbeat");
             break;
         default:
-            /* power-on / reset -- already logged EVT_BOOT in setup() */
             break;
     }
 
-    /* Always re-check tamper + thresholds on every wake, independent of
-     * what caused it -- OLED is off at this point so per spec the
-     * buzzer stays silent here even on a breach. */
     if (Tamper.checkNow()) {
-        EventLog.logEvent(EVT_TAMPER, Tamper.lastRawValue(), 0, 0, "poll");
+        EventLog.logEvent(EVT_TAMPER, r, "poll");
     }
-    checkThresholdsAndLog(r, /*oledActive=*/false);
+    checkThresholdsAndLog(r, false);
 
     if (r.batteryPercent <= 10) {
-        EventLog.logEvent(EVT_LOW_BATTERY, r.batteryVoltage, r.batteryPercent, 0, "");
+        EventLog.logEvent(EVT_LOW_BATTERY, r, "battery-low");
     }
 }
-
 /* Logs + returns true if ANY threshold was breached (caller decides
  * whether to actually sound the buzzer, based on OLED state).
  *
@@ -349,7 +326,7 @@ static bool checkThresholdsAndLog(const SensorReadings &r, bool oledActive) {
     bool luxBreached = r.ambientLux >= s.threshLux;
     if (luxBreached) {
         if (!luxBreachActive) {
-            EventLog.logEvent(EVT_LIGHT_THRESHOLD, r.ambientLux, s.threshLux, 0, "lux-breach");
+            EventLog.logEvent(EVT_LIGHT_THRESHOLD, r, "lux-breach");
         }
         breached = true;
     }
@@ -358,7 +335,7 @@ static bool checkThresholdsAndLog(const SensorReadings &r, bool oledActive) {
     bool tempBreached = r.temperatureC >= s.threshTempC;
     if (tempBreached) {
         if (!tempBreachActive) {
-            EventLog.logEvent(EVT_TEMP_THRESHOLD, r.temperatureC, s.threshTempC, 0, "temp-breach");
+            EventLog.logEvent(EVT_TEMP_THRESHOLD, r, "temp-breach");
         }
         breached = true;
     }
@@ -409,7 +386,10 @@ static void runInitialSensorStatusLoop() {
         if (confirmButtonPressed(BTN_MODE_PIN)) {
             while (buttonIsPressed(BTN_MODE_PIN)) delay(10); /* wait release */
             BuzzerDev.beepShort();
-            EventLog.logEvent(EVT_MODE_CHANGE, MODE_WEBUI, 0, 0, "button->webui(boot)");
+            // Change from:
+            // EventLog.logEvent(EVT_MODE_CHANGE, MODE_WEBUI, 0, 0, "button->webui(boot)");
+            // To:
+            EventLog.logEvent(EVT_MODE_CHANGE, Sensors.readAll(), "button->webui(boot)");
             g_mode = MODE_WEBUI;
             return;
         }
@@ -426,13 +406,19 @@ static void runLoggingModeActiveWindow() {
         uint32_t start = millis();
         while (buttonIsPressed(BTN_MODE_PIN) && (millis() - start) < 2000) delay(10);
         BuzzerDev.beepShort();
-        EventLog.logEvent(EVT_MODE_CHANGE, MODE_WEBUI, 0, 0, "button->webui");
+        // Change from:
+        // EventLog.logEvent(EVT_MODE_CHANGE, MODE_WEBUI, 0, 0, "button->webui");
+        // To:
+        EventLog.logEvent(EVT_MODE_CHANGE, Sensors.readAll(), "button->webui");
         g_mode = MODE_WEBUI;
         return; /* caller will start Web UI instead of sleeping */
     }
 
     if (displayPressed) {
-        EventLog.logEvent(EVT_BUTTON_DISPLAY, 0, 0, 0, "info-screen");
+        // Change from:
+        // EventLog.logEvent(EVT_BUTTON_DISPLAY, 0, 0, 0, "info-screen");
+        // To:
+        EventLog.logEvent(EVT_BUTTON_DISPLAY, Sensors.readAll(), "info-screen");
         BuzzerDev.beepShort();
         Display.wake();
 
@@ -466,7 +452,10 @@ static void runLoggingModeActiveWindow() {
             if (confirmButtonPressed(BTN_MODE_PIN)) {
                 while (buttonIsPressed(BTN_MODE_PIN)) delay(10); /* wait release */
                 BuzzerDev.beepShort();
-                EventLog.logEvent(EVT_MODE_CHANGE, MODE_WEBUI, 0, 0, "button->webui");
+                // Change from:
+                // EventLog.logEvent(EVT_MODE_CHANGE, MODE_WEBUI, 0, 0, "button->webui");
+                // To:
+                EventLog.logEvent(EVT_MODE_CHANGE, Sensors.readAll(), "button->webui");
                 g_mode = MODE_WEBUI;
                 Display.sleep();
                 return;
@@ -524,7 +513,10 @@ static void runWebUiLoop() {
     if (millis() - lastTamperPoll > TAMPER_POLL_INTERVAL_MS) {
         lastTamperPoll = millis();
         if (Tamper.checkNow()) {
-            EventLog.logEvent(EVT_TAMPER, Tamper.lastRawValue(), 0, 0, "webui-poll");
+            // Change from:
+            // EventLog.logEvent(EVT_TAMPER, Tamper.lastRawValue(), 0, 0, "webui-poll");
+            // To:
+            EventLog.logEvent(EVT_TAMPER, Sensors.readAll(), "webui-poll");;
         }
     }
 
@@ -550,7 +542,10 @@ static void runWebUiLoop() {
 
 static void exitWebUiModeBackToLogging() {
     BuzzerDev.beepShort();
-    EventLog.logEvent(EVT_MODE_CHANGE, MODE_LOGGING, 0, 0, "button->logging");
+    // Change from:
+    // EventLog.logEvent(EVT_TAMPER, Tamper.lastRawValue(), 0, 0, "webui-poll");
+    // To:
+    EventLog.logEvent(EVT_TAMPER, Sensors.readAll(), "webui-poll");
     WebUi.stop();
     g_mode = MODE_LOGGING;
     goToDeepSleep();

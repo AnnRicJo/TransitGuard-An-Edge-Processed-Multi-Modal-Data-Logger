@@ -103,7 +103,7 @@ static inline bool buttonIsPressed(uint8_t pin) {
  *  the EXT1 ANY_HIGH wake bank with the buttons.
  * ------------------------------------------------------------------- */
 #define MPU_INT_PIN          27
-#define MPU_MOTION_THRESHOLD_DEFAULT  8    /* 1=very sensitive .. 255=insensitive,
+#define MOTION_THRESHOLD_DEFAULT  8    /* 1=very sensitive .. 255=insensitive,
                                                raw units per Adafruit_MPU6050;
                                                tune on the bench with the box's
                                                actual packing/cushioning */

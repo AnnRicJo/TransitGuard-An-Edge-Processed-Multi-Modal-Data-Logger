@@ -1,53 +1,45 @@
 #pragma once
-/* =====================================================================
- *  settings.h
- *  --------------------------------------------------------------
- *  Wraps the ESP32 Preferences (NVS) library to persist:
- *    - alert thresholds (lux / proximity / temperature)
- *    - the "home" Wi-Fi credentials used only briefly to fetch NTP time
- *    - the device's own AP SSID/password
- *  All of this is editable from the Web UI dashboard.
- * =====================================================================
- */
 #include <Arduino.h>
 
 struct DeviceSettings {
-    float   threshLux;
-    float   threshProximity;
-    float   threshTempC;
-    uint8_t motionThreshold;   /* MPU6050 shock/motion sensitivity, 1-255 */
+    char     apSsid[32];
+    char     apPass[32];
 
-    uint32_t loggingIntervalSec; /* time between successive logged sensor-
-                                     data rows, set by the user in the Web
-                                     UI; data is also logged immediately on
-                                     any threshold-breach interrupt
-                                     (motion/proximity/lux/temp) regardless
-                                     of this interval */
+    float    threshLux;
+    float    threshTempC;
+    uint8_t  motionThreshold;
+    uint32_t loggingIntervalSec;
 
-    char    homeWifiSsid[33];
-    char    homeWifiPass[65];
+    // Directional shock thresholds (in units of g)
+    float    threshAccelX;
+    float    threshAccelY;
+    float    threshAccelZ;
 
-    char    apSsid[33];
-    char    apPass[65];
+    // Tilt limits (in degrees)
+    float    threshPitch;
+    float    threshRoll;
+
+    // Calibration biases
+    float    calibOffsetX;
+    float    calibOffsetY;
+    float    calibOffsetZ;
 };
 
 class SettingsManager {
 public:
-    void begin();                       /* loads from NVS, or writes defaults */
-    const DeviceSettings &get() const { return _settings; }
-
-    void setThresholds(float lux, float prox, float tempC);
-    void setMotionThreshold(uint8_t thr);
+    bool begin();
+    const DeviceSettings& get() const { return _settings; }
+    
+    void setBasicThresholds(float lux, float temp);
+    void setDirectionalThresholds(float ax, float ay, float az, float pitch, float roll);
+    void setMotionThreshold(uint8_t m);
     void setLoggingInterval(uint32_t sec);
-    void setHomeWifi(const char *ssid, const char *pass);
-    void setApCredentials(const char *ssid, const char *pass);
-
-    void resetToDefaults();
+    void setCalibrationOffsets(float ox, float oy, float oz);
+    void save();
 
 private:
     DeviceSettings _settings;
-    void load();
-    void save();
+    void loadDefaults();
 };
 
 extern SettingsManager Settings;
