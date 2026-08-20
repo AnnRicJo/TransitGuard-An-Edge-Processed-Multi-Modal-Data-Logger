@@ -28,37 +28,48 @@ Millions of dollars are lost annually due to the mishandling of fragile, high-va
 * **Multi-Modal Sensor Fusion:** Combines 6-axis IMU, barometric pressure, temperature, and ambient light monitoring.
 * **Tamper & Breach Detection:** Utilizes light sensing and capacitive breach detection to log package opening events.
 * **Local Readout & CSV Storage:** Displays live status on an OLED display and archives full audit logs to a MicroSD card in `.CSV` format.
+  
 # Hardware Assembly
 
 The following images show the progressive assembly of the TransitGuard enclosure, from the initial hardware integration to the completed package-ready unit.
 
+### 1. Full Assembly
+
 <p align="center">
-  <img src="/assets/images/full_pack.jpg" width="800"><br/>
+  <img src="/assets/images/full_pack.jpg" width="450"><br/>
   <i>TransitGuard fully assembled within the protective transport enclosure</i>
 </p>
 
+### 2. Half Assembly
+
 <p align="center">
-  <img src="/assets/images/half_assembly.jpg" width="800"><br/>
+  <img src="/assets/images/half_assembly.jpg" width="450"><br/>
   <i>Partial assembly of the TransitGuard enclosure showing component placement</i>
 </p>
 
+### 3. Internal Electronics
+
 <p align="center">
-  <img src="/assets/images/internals.jpg" width="800"><br/>
+  <img src="/assets/images/internals.jpg" width="450"><br/>
   <i>Internal arrangement of the TransitGuard sensing, processing, and power electronics</i>
 </p>
 
+### 4. Lid Open
+
 <p align="center">
-  <img src="/assets/images/lid_open.jpg" width="800"><br/>
+  <img src="/assets/images/lid_open.jpg" width="450"><br/>
   <i>TransitGuard enclosure opened to expose the internal electronics and sensor assembly</i>
 </p>
 
+### 5. Quarter Assembly
+
 <p align="center">
-  <img src="/assets/images/quarter_assembly.jpg" width="800"><br/>
+  <img src="/assets/images/quarter_assembly.jpg" width="450"><br/>
   <i>Early-stage enclosure assembly showing the integration of the TransitGuard hardware</i>
 </p>
 
-
 ## Demo / Examples
+
 
 ### **Images**
 
