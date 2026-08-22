@@ -30,7 +30,10 @@ Millions of dollars are lost annually due to the mishandling of fragile, high-va
 * **Onboard Web Dashboard:** The device hosts its own Wi-Fi access point and a browser-based dashboard for live sensor readings, threshold configuration, time sync, CSV download, and resetting for the next transit — no external app or cloud service required.
 * **Local Readout & CSV Storage:** Displays live status on an OLED display and archives the full audit log directly on the ESP32's onboard flash (LittleFS) in `.CSV` format, downloadable through the dashboard.
 
-# Hardware Assembly
+## Demo / Examples
+
+### **Images**
+#### Hardware Assembly
 
 The following images show the progressive assembly of the TransitGuard enclosure, from the initial hardware integration to the completed package-ready unit.
 
@@ -69,9 +72,6 @@ The following images show the progressive assembly of the TransitGuard enclosure
   <i>Early-stage enclosure assembly showing the integration of the TransitGuard hardware</i>
 </p>
 
-## Demo / Examples
-
-### **Images**
 
 <p align="center">
   <img src="/assets/images/transitguard/hardware-setup.jpg" width="800"><br/>
