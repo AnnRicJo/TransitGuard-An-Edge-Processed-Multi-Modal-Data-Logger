@@ -80,7 +80,7 @@ The following images show the progressive assembly of the TransitGuard enclosure
 
 <p align="center">
   <img src="/assets/images/transitguard/circuit-schematic.jpg" width="800"><br/>
-  <i>Circuit schematic showing the MYOSA board, TP4056 power shield, and 1N5819 Schottky protection diodes</i>
+  <i>Circuit schematic showing the MYOSA board and T856C power shield</i>
 </p>
 
 ### **Videos**
@@ -92,7 +92,7 @@ The following images show the progressive assembly of the TransitGuard enclosure
 ## Features (Detailed)
 
 ### **1. Interrupt-Driven Edge Shock Logging (MPU6050)**
-Continuous data logging rapidly consumes battery power and memory. TransitGuard configures the MPU6050 6-axis IMU to maintain a hardware motion/shock interrupt on GPIO27. The ESP32 remains in deep sleep and only wakes when the configured motion threshold is breached (or a button is pressed, or the periodic timer fires) via an EXT1 multi-pin wake bank, then reads and fuses all sensors and logs the peak acceleration magnitude, orientation, and timestamp before returning to sleep.
+Continuous data logging rapidly consumes battery power and memory. TransitGuard configures the MPU6050 6-axis IMU to maintain a hardware motion/shock interrupt on GPIO27. The ESP32 remains in deep sleep and wakes when the configured motion threshold is breached via an EXT1 multi-pin wake bank, then reads and fuses all sensors and logs the peak acceleration magnitude, orientation, and timestamp before returning to sleep.
 
 ### **2. Environmental Monitoring (BMP180)**
 The onboard BMP180 sensor tracks ambient temperature and atmospheric pressure. Temperature is selected automatically from the best available source: the BMP180 first, the MPU6050's internal temperature sensor if the BMP180 isn't detected, and the ESP32's internal sensor as a last-resort fallback. This monitors for dangerous freezing or overheating in cargo holds and helps flag rapid pressure changes that could indicate rough handling of sealed packaging.
@@ -144,7 +144,7 @@ esp_deep_sleep_start();
 * APDS9960 Ambient Light Sensor & SSD1306 OLED
 * Capacitive-touch tamper sensing (ESP32 native touch peripheral)
 * C++ / Arduino Framework / PlatformIO
-* TP4056 Power Management, ESP32 LittleFS Event Logging
+* T856C Power Management, ESP32 LittleFS Event Logging
 * ESP32 Wi-Fi Access Point, WebServer, DNS Server & mDNS (onboard dashboard)
 
 ## Requirements / Installation
