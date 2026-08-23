@@ -4,524 +4,196 @@ Firmware for the ESP32-based MYOSA Mini Kit used in the Transit Package Logger.
 
 The firmware has two main operating modes:
 
-- **Low-power logging:** the ESP32 spends most of its time in deep sleep and wakes to record events or periodic sensor readings.
-- **Web UI:** the ESP32 creates its own Wi-Fi access point and hosts a browser dashboard for viewing sensor data, changing thresholds, downloading the CSV log, and preparing the device for the next transit.
+* **Low-power logging (`MODE_LOGGING`):** The ESP32 spends most of its time in deep sleep and wakes to record events, periodic sensor readings, dynamic shocks, or enclosure tamper triggers.
+* **Web UI (`MODE_WEBUI`):** The ESP32 creates its own Wi-Fi access point and hosts a browser dashboard for viewing real-time sensor data, modifying directional and environmental thresholds, zero-calibrating the IMU, downloading the CSV log, and preparing the device for the next transit session.
 
-The firmware is written with **PlatformIO + Arduino framework**.
+The firmware is written with PlatformIO and the Arduino framework.
 
 ---
 
-## Hardware
+## Hardware & Peripheral Interfaces
 
 | Component | Interface / Address | Purpose |
 |---|---|---|
-| MYOSA Mini Kit / ESP32-WROOM-32E | — | Main controller |
-| SSD1306 OLED | I2C `0x3C` | Status and package information |
+| MYOSA Mini Kit / ESP32-WROOM-32E | — | Main microcontroller |
+| SSD1306 OLED (128x64) | I2C `0x3C` | Real-time status, diagnostics, and package monitoring |
 | APDS9960 | I2C `0x39` | Ambient-light measurement |
-| MPU6050 | I2C `0x69` | Motion/shock detection |
-| BMP180 | I2C `0x77` | Temperature and pressure |
-| Passive piezo buzzer | GPIO | Audible feedback and alerts |
-| Aluminium-foil tamper sensor | ESP32 Touch0 | Tamper detection |
-| LiPo battery | ADC through divider | Battery-voltage measurement |
-| MYOSA onboard LED | GPIO2 | Firmware status indication |
+| MPU6050 | I2C `0x69` (AD0 High) | 6-DoF motion/shock detection and orientation estimation |
+| BMP180 | I2C `0x77` | Barometric pressure and primary temperature sensing |
+| Passive piezo buzzer | GPIO 19 | Audible user feedback and repeating threshold alert beeps |
+| Aluminium-foil tamper sensor | ESP32 Touch0 (`GPIO 4`) | Capacitive enclosure seal breach and cut-foil detection |
+| LiPo battery | ADC1 (`GPIO 34`) via 2:1 divider | Voltage monitoring and state-of-charge calculation |
+| Motherboard Status LED | GPIO 2 | System activity, Web UI mode, and tamper status indication |
 
-### Current sensor configuration
+### Sensor Subsystem Details
 
-The final firmware uses the APDS9960 **only for ambient-light sensing**.
-
-Proximity and gesture detection are disabled in the current implementation. The corresponding proximity/gesture functions remain in the code structure, but they are not active features.
-
-Temperature is selected automatically:
-
-1. BMP180 temperature, when the BMP180 is detected.
-2. MPU6050 internal temperature, if the BMP180 is unavailable.
-3. ESP32 internal temperature as the final fallback.
+* **Ambient Light Sensing:** The APDS9960 operates with color integration enabled and gesture engines disabled, measuring clear-channel lux to detect box-opening events.
+* **Adaptive Temperature Selection:** BMP180 barometric temperature is preferred; MPU6050 internal temperature is used as the secondary fallback; ESP32 internal core temperature (`temperatureRead()`) is used as the final fallback.
+* **Motion & Tilt Engine:** The MPU6050 operates across $\pm 8\text{ g}$ accelerometer and $\pm 500^\circ/\text{s}$ gyroscope ranges with a $21\text{ Hz}$ low-pass filter and a $0.63\text{ Hz}$ high-pass filter for motion interrupt detection. Pitch, roll, and spatial package orientation (`TOP_UP`, `UPSIDE_DOWN`, `TILT_X_POS`, `TILT_X_NEG`, `TILT_Y_POS`, `TILT_Y_NEG`, `ANGLED`) are calculated on every sample.
 
 ---
 
-## Pinout
+## Detailed Pinout Declarations
 
-| Signal | GPIO | Notes |
-|---|---:|---|
-| I2C SDA | `21` | Shared by OLED, APDS9960, MPU6050 and BMP180 |
-| I2C SCL | `22` | Shared I2C bus |
-| Mode / UI button | `32` | Active-HIGH, internal pulldown |
-| Display button | `33` | Active-HIGH, internal pulldown |
-| APDS9960 INT | `25` | Reserved in the current hardware configuration; proximity interrupt is disabled |
-| MPU6050 INT | `27` | Motion/shock interrupt |
-| Tamper foil | `4` | ESP32 Touch0 |
-| Battery ADC | `34` | ADC input through a 2:1 resistor divider |
-| Buzzer | `19` | Passive piezo driven directly by GPIO |
-| Onboard LED | `2` | MYOSA status LED |
+| Signal / Constant | GPIO | Direction / Mode | Functional Notes |
+|---|---:|---|---|
+| `I2C_SDA_PIN` | `21` | Bidirectional | Shared I2C Data bus; isolated via RTC domain during deep sleep to prevent panel noise |
+| `I2C_SCL_PIN` | `22` | Output | Shared I2C Clock bus (100 kHz); isolated prior to deep sleep |
+| `BTN_MODE_PIN` | `32` | Input (RTC Pull-down) | Active-HIGH UI/Mode toggle button; joined to `EXT1` wake mask |
+| `BTN_DISPLAY_PIN` | `33` | Input (RTC Pull-down) | Active-HIGH Display button; wakes OLED for 5s status screen in logging mode |
+| `MPU_INT_PIN` | `27` | Input (RTC Pull-down) | Active-HIGH latched hardware motion interrupt; joined to `EXT1` wake mask |
+| `APDS_INT_PIN` | `25` | Input (Pull-up) | Dedicated active-LOW open-drain interrupt line (`EXT0`) |
+| `TOUCH_TAMPER_PIN`| `4` | Capacitive Touch0 (`T0`) | Connected to internal security foil lining; wakes device on touch pad trigger |
+| `BATT_ADC_PIN` | `34` | Analog Input (ADC1) | Sensed through a 2:1 divider with 11dB attenuation |
+| `BUZZER_PIN` | `19` | Digital Output | Bit-banged square-wave drive at 2700 Hz (resonant peak) |
+| `STATUS_LED_PIN` | `2` | Digital Output | Visual status indicator (wake heartbeat, Web UI indicator, tamper fast blink) |
 
-### Button wiring
+### Button Wiring & EXT1 Wake Requirement
 
-Both buttons are **active-HIGH**:
+Both physical buttons are wired **active-HIGH**:
 
 ```text
-3.3V ──[ BUTTON ]── GPIO
-                     │
-                 internal
-                 pulldown
+3.3V ──[ BUTTON ]── GPIO (32 / 33)
+                      │
+                   internal
+                   pulldown
 ```
 
-- Idle = `LOW`
-- Pressed = `HIGH`
+* Idle state reads `LOW`.
+* Pressed state reads `HIGH`.
 
-This polarity is required by the current deep-sleep `EXT1` wake configuration, which uses `ANY_HIGH` for the buttons and MPU6050 interrupt.
+The ESP32 deep-sleep `EXT1` controller requires uniform polarity when grouping multiple wake sources (`ESP_EXT1_WAKEUP_ANY_HIGH`). Because the MPU6050 interrupt is configured as active-HIGH, the physical buttons share the active-HIGH configuration on the `EXT1` bank.
 
 ---
 
-## Firmware behaviour
+## Configuration Parameters & NVS Settings
 
-### 1. Power-on
+All tunable thresholds and operational settings are persisted in non-volatile flash storage using ESP32 `Preferences`:
 
-After a true power-on:
-
-1. The OLED displays the Transit Logger boot screen.
-2. The firmware initialises the sensors, display, filesystem, battery measurement and tamper system.
-3. A short buzzer confirmation is given.
-4. The OLED continuously displays sensor detection status and battery level.
-5. Pressing the **Mode / UI button** enters Web UI mode.
-
-The sensor-status screen does **not** automatically time out.
-
----
-
-### 2. Low-power logging mode
-
-In logging mode, the OLED is normally off and the ESP32 enters deep sleep.
-
-The device wakes from:
-
-- MPU6050 motion/shock interrupt
-- Mode button
-- Display button
-- Capacitive tamper wake
-- Configured periodic logging timer
-
-After waking, the firmware:
-
-1. Reads the available sensors.
-2. Determines the wake/event reason.
-3. Records the appropriate event in the CSV log.
-4. Checks tamper and light/temperature thresholds.
-5. Records a low-battery event if the battery is at or below 10%.
-6. Returns to deep sleep unless a button requests another mode.
-
-### Periodic logging
-
-The default logging interval is:
-
-```text
-600 seconds (10 minutes)
-```
-
-The interval can be changed from the Web UI and is limited to:
-
-```text
-30 seconds – 86400 seconds
-```
-
-A periodic wake records a sensor snapshot even when no other event has occurred.
+| Parameter Name | NVS Key | Default Value | Unit | Functional Significance |
+|---|---|---|---|---|
+| `apSsid` | — | `"TransitLogger-AP"` | — | SoftAP SSID broadcast during Web UI mode |
+| `apPass` | — | `"12345678"` | — | WPA2 password for dashboard authentication |
+| `threshLux` | `"lux"` | `50.0` | Lux | Ambient light threshold that flags an enclosure breach or box-opening event |
+| `threshTempC` | `"temp"` | `45.0` | °C | Thermal safety limit for sensitive cargo; triggers alerts when exceeded |
+| `motionThreshold` | `"motion"` | `20` (Clamped $\ge 25$) | LSB | MPU6050 hardware motion engine threshold required to assert `MPU_INT_PIN` |
+| `loggingIntervalSec` | `"interval"` | `60` | Seconds | Periodic sleep timer interval for routine heartbeat CSV snapshots |
+| `threshAccelX` | `"th_ax"` | `2.0` | g | Shock threshold limit along the X-axis before logging `EVT_MOTION` |
+| `threshAccelY` | `"th_ay"` | `2.0` | g | Shock threshold limit along the Y-axis before logging `EVT_MOTION` |
+| `threshAccelZ` | `"th_az"` | `2.5` | g | Shock threshold limit along the Z-axis before logging `EVT_MOTION` |
+| `threshPitch` | `"th_pitch"`| `45.0` | Degrees | Maximum allowable tilt angle on pitch before raising an alert |
+| `threshRoll` | `"th_roll"` | `45.0` | Degrees | Maximum allowable tilt angle on roll before raising an alert |
+| `calibOffsetX` | `"cal_x"` | `0.0` | g | Level zero calibration offset compensation for X-axis |
+| `calibOffsetY` | `"cal_y"` | `0.0` | g | Level zero calibration offset compensation for Y-axis |
+| `calibOffsetZ` | `"cal_z"` | `0.0` | g | Level zero calibration offset compensation for Z-axis (normalized to $+1.0\text{ g}$ upright) |
 
 ---
 
-## Motion / shock detection
+## Firmware Behaviour & Execution Flow
 
-The MPU6050 is configured for motion detection using its hardware interrupt.
+### 1. Power-on (Cold Boot)
+* Draws the `Transit Logger` splash screen on the OLED panel.
+* Initializes I2C bus peripherals, LittleFS filesystem, NVS settings, battery ADC, and tamper baseline.
+* Logs an initial `EVT_BOOT` record to LittleFS and sounds a short buzzer confirmation.
+* Runs a continuous sensor diagnostics screen showing live probe state (`OK/ACTIVE` or `NOT FOUND`) for MPU6050, BMP180, and APDS9960 along with live battery metrics.
+* Blocks until the user presses the **Mode button**, transitioning the unit directly into Web UI mode.
 
-Current configuration:
-
-- Accelerometer range: **±8 g**
-- Gyroscope range: **±500 °/s**
-- Filter bandwidth: **21 Hz**
-- Motion threshold: configurable, default `8`
-- Motion duration: `20` samples
-- Interrupt: GPIO `27`
-
-The motion sensitivity can be changed from the Web UI.
-
-The firmware also records the current acceleration magnitude in `g`.
-
-> The motion threshold should be tested with the final enclosure and packing material because normal transport vibration can generate motion events.
+### 2. Low-Power Logging Mode (`MODE_LOGGING`)
+Between logging cycles, the OLED display is turned off (`SSD1306_DISPLAYOFF`), status LEDs are turned off, and the ESP32 enters deep sleep with wakeup sources armed:
+* **Timer Wakeup:** Fires every `loggingIntervalSec` to record regular heartbeat entries.
+* **MPU6050 Shock/Motion Wakeup (`EXT1`):** Wakes the chip when dynamic shock or directional acceleration limits are exceeded.
+* **Capacitive Tamper Wakeup (`TouchPad`):** Wakes the chip if foil capacitance shifts beyond the calibration margin.
+* **Display Button (`EXT1`):** Wakes the OLED for **5 seconds** (`LOWPOWER_DISPLAY_DURATION_MS`), displaying battery percentage, wall-clock time, safety status, and active breach flags. If tamper or threshold limits are breached while the display is awake, the buzzer sounds continuous repeating alarm beeps.
+* **Mode Button (`EXT1`):** Wakes the system and switches state to `MODE_WEBUI`.
 
 ---
 
-## Tamper detection
+## Tamper Sensing & Latching
 
-The aluminium-foil lining is connected to the ESP32's capacitive-touch input on **GPIO4 / Touch0**.
-
-On the first setup, the firmware takes an averaged baseline from 10 touch readings.
-
-A significant deviation from that baseline is treated as tampering.
-
-The tamper state is **latched in ESP32 NVS**, meaning it remains recorded until explicitly cleared from the Web UI.
-
-Tamper can therefore remain recorded even after a reset or battery removal.
-
-### Initial calibration
-
-The first calibration should be performed with the box in its normal sealed configuration and without touching the foil.
-
-The allowed deviation is currently defined in `src/tamper.cpp`:
-
-```cpp
-#define TAMPER_ALLOWED_DELTA 20
-```
-
-This value may need to be tuned for the final enclosure and foil geometry.
+Tamper sensing utilizes native ESP32 capacitive touch sensing on `GPIO 4` (`Touch0`) connected to the package's internal aluminum foil lining:
+* **Baseline Calibration:** A 10-sample baseline average is taken on initial boot and stored in NVS (`tamper` namespace).
+* **Deviation Detection:** Any delta greater than `TAMPER_ALLOWED_DELTA` (default: 30 counts) latches the tamper state to `true` in flash.
+* **NVS Latching:** Tamper evidence survives resets, reboots, and complete battery disconnects, remaining permanently flagged until acknowledged and cleared via the Web UI dashboard.
 
 ---
 
-## Battery monitoring
+## Event Logging & CSV Specification
 
-The charger module does not provide digital battery telemetry.
+Events are written to `/events.csv` on the LittleFS partition.
 
-Battery voltage is therefore measured by the ESP32 through:
-
-- ADC pin: `GPIO34`
-- Resistor divider: `2:1`
-- ADC reference used by firmware: `3.3 V`
-
-The firmware maps:
-
-```text
-4.2 V → 100%
-3.3 V → 0%
-```
-
-The battery percentage shown by the firmware is therefore a voltage-based estimate rather than a fuel-gauge measurement.
-
-If the actual resistor divider differs from the current design, update:
-
-```cpp
-BATT_DIVIDER_RATIO
-```
-
-in `include/config.h`.
-
----
-
-## OLED displays
-
-The SSD1306 OLED uses I2C address `0x3C`.
-
-The firmware has four main display states:
-
-### Boot screen
-
-Shown briefly after power-on.
-
-### Sensor status
-
-Shown continuously after a true power-on until the Mode button is pressed.
-
-It shows:
-
-- MPU6050 status
-- BMP180 status
-- APDS9960 status
-- Battery voltage and percentage
-
-### Web UI mode
-
-Shows:
-
-- Web UI mode indicator
-- `transitlogger.local`
-- Battery voltage and percentage
-- Device time
-
-### Low-power information screen
-
-Pressing the Display button during logging mode wakes the OLED for **5 seconds**.
-
-It shows:
-
-- Battery status
-- Device time
-- Package safety status
-- Tamper / light / temperature alerts when applicable
-
-The Display button has no function while Web UI mode is active.
-
----
-
-## Buzzer and status LED
-
-### Buzzer
-
-The passive piezo buzzer is connected directly to GPIO19.
-
-A short beep confirms button/actions.
-
-Alert beeps are produced when an applicable threshold or tamper condition is active **while the OLED is being shown**.
-
-Background deep-sleep logging does not continuously sound the buzzer.
-
-### Onboard LED
-
-GPIO2 is used as the MYOSA status LED:
-
-| State | LED |
-|---|---|
-| Deep-sleep logging | OFF |
-| Wake/event activity | Brief blink |
-| Web UI mode | Solid ON |
-| Tamper latched in Web UI | Fast blink |
-
----
-
-# Web UI
-
-Press the **Mode / UI button** to enter Web UI mode.
-
-The ESP32 creates a Wi-Fi access point using the configured SSID and password.
-
-The default SSID prefix is:
-
-```text
-TransitLogger-
-```
-
-The last three bytes of the ESP32 MAC address are appended to make the default SSID unique.
-
-The default AP password is defined in:
-
-```text
-include/config.h
-```
-
-**Change the default password before deployment.**
-
-## Opening the dashboard
-
-After connecting to the ESP32's Wi-Fi network, open:
-
-```text
-http://transitlogger.local
-```
-
-The firmware also runs a captive-portal-style DNS server, so opening another address in the browser can redirect to the dashboard.
-
-If automatic captive-portal detection does not appear, use the `transitlogger.local` address.
-
----
-
-## Dashboard functions
-
-The Web UI provides:
-
-### Live sensor data
-
-- Ambient light
-- Battery voltage and percentage
-- Temperature
-- Pressure
-- Acceleration magnitude
-- Device time
-- Number of logged events
-- Tamper status
-
-The live status is refreshed approximately every **3 seconds**.
-
-### Threshold configuration
-
-The following values can be changed:
-
-- Ambient-light threshold
-- Temperature threshold
-- MPU6050 motion sensitivity
-- Logging interval
-
-These settings are stored in ESP32 NVS and survive resets.
-
-### Time synchronisation
-
-The dashboard includes **Sync time with this device**.
-
-This sends the browser's current Unix time and timezone offset to the ESP32.
-
-The firmware does **not** currently perform an automatic NTP connection. Time synchronisation is performed through the Web UI.
-
-### CSV download
-
-The current event log can be downloaded from the dashboard as:
-
-```text
-transit_log.csv
-```
-
-### Reset for next transit
-
-The reset function clears the existing event log and creates a new log beginning with a `LOG_RESET` event.
-
-### Return to low-power mode
-
-The Web UI provides a **Go to sleep now** button.
-
-Pressing the physical Mode button has the same effect.
-
-Saving the logging settings also returns the device to low-power logging mode.
-
----
-
-# Event logging
-
-Events are stored in:
-
-```text
-/events.csv
-```
-
-on the ESP32's LittleFS filesystem.
-
-The CSV format is:
-
+### CSV Schema
 ```csv
-timestamp,event_type,value1,value2,value3,note
+timestamp,event_type,lux,temp_c,press_hpa,accel_x,accel_y,accel_z,mag_g,pitch,roll,orientation,batt_pct,note
 ```
 
-Possible event types currently defined by the firmware include:
+### Event Type Definitions
+* `EVT_BOOT` (0): Cold boot initialization event.
+* `EVT_PERIODIC` (1): Routine heartbeat record triggered by sleep timer.
+* `EVT_PROXIMITY` (2): Proximity interrupt event.
+* `EVT_LIGHT_THRESHOLD` (3): Light ingress event exceeding lux threshold.
+* `EVT_GESTURE` (4): Optical gesture trigger.
+* `EVT_TEMP_THRESHOLD` (5): Temperature limit exceeded.
+* `EVT_TAMPER` (6): Enclosure security foil capacitance breach.
+* `EVT_MODE_CHANGE` (7): State transitions between Logging and Web UI modes.
+* `EVT_BUTTON_DISPLAY` (8): Manual package status check via display button.
+* `EVT_LOG_RESET` (9): Flash log cleared for a new transit deployment.
+* `EVT_LOW_BATTERY` (10): Battery voltage dropped to $\le 10\%$.
+* `EVT_MOTION` (11): Dynamic shock or directional acceleration threshold breach.
 
-- `BOOT`
-- `PERIODIC`
-- `PROXIMITY`
-- `LIGHT_THRESHOLD`
-- `GESTURE`
-- `TEMP_THRESHOLD`
-- `TAMPER`
-- `MODE_CHANGE`
-- `BUTTON_DISPLAY`
-- `LOG_RESET`
-- `LOW_BATTERY`
-- `MOTION`
-
-`PROXIMITY` and `GESTURE` event types remain defined for compatibility with the event system, but the corresponding APDS9960 features are disabled in the current firmware.
-
-Light and temperature threshold events are logged on the transition into a breached state rather than repeatedly logging the same continuous breach.
+*Note: Threshold events are edge-triggered to prevent duplicate consecutive logs during sustained alarm states.*
 
 ---
 
-# Project structure
+## Interactive Web UI Dashboard
 
-```text
-transit-logger/
-├── include/
-│   ├── buzzer.h
-│   ├── config.h
-│   ├── display.h
-│   ├── event_log.h
-│   ├── rtc_time.h
-│   ├── sensors.h
-│   ├── settings.h
-│   ├── tamper.h
-│   └── webui.h
-│
-├── src/
-│   ├── buzzer.cpp
-│   ├── config.cpp
-│   ├── display.cpp
-│   ├── event_log.cpp
-│   ├── main.cpp
-│   ├── rtc_time.cpp
-│   ├── sensors.cpp
-│   ├── settings.cpp
-│   ├── tamper.cpp
-│   └── webui.cpp
-│
-├── lib/
-│   ├── Adafruit APDS9960 Library/
-│   ├── Adafruit BMP085 Library/
-│   └── Adafruit MPU6050/
-│
-├── platformio.ini
-└── README.md
-```
+When switched into `MODE_WEBUI`, the ESP32 activates SoftAP mode, starts an internal DNS captive portal, and advertises via mDNS at `http://transitlogger.local`:
+
+* **Live Telemetry Stream:** Asynchronous updates for ambient lux, temperature, barometric pressure, estimated altitude, 3-axis acceleration, dynamic shock ($g$), pitch, roll, spatial orientation, battery state, and tamper status.
+* **Real-Time Data Visualizations:** Dynamic SVG sparkline graphs for telemetry channels.
+* **Event Log Table:** Integrated filter, multi-column sorting, raw CSV download (`/download`), and client-side filtered CSV export.
+* **System Actions & Calibration:** Zero Level Calibration averages 30 accelerometer readings; Time Synchronization syncs browser epoch to ESP32 RTC; Tamper Reset clears NVS tamper state; Transit Log Reset wipes stored CSV records; Arm Sleep commits updated parameters and drops back into `MODE_LOGGING`.
 
 ---
 
-# Build and upload
+## Status LED Indication (`GPIO 2`)
 
-Install **PlatformIO** and open the `transit-logger` directory as the PlatformIO project.
+| Device State | Status LED Behavior |
+|---|---|
+| Deep-Sleep Logging (`MODE_LOGGING`) | OFF (minimizes power consumption) |
+| Wake / Logging Pulse | Brief 25ms flash on event recording |
+| Web UI Active (`MODE_WEBUI`) | Solid ON |
+| Tamper Latched | Fast continuous blinking (150ms period) |
 
-The project targets an ESP32-compatible `esp32dev` board definition with the Arduino framework.
+---
 
-### Build
+## Project File Structure
 
+* `include/buzzer.h` & `src/buzzer.cpp`: Bit-banged piezo tone driver definitions and direct GPIO pulse implementation.
+* `include/config.h` & `src/config.cpp`: Pin assignments, timing macros, wake masks, thresholds, and event string conversion.
+* `include/display.h` & `src/display.cpp`: SSD1306 OLED interface, glyph rendering, and screen layout methods.
+* `include/event_log.h` & `src/event_log.cpp`: LittleFS CSV event log manager class and file operations.
+* `include/rtc_time.h` & `src/rtc_time.cpp`: Wall-clock timekeeper and uptime string formatting.
+* `include/sensors.h` & `src/sensors.cpp`: Sensor reading structures, I2C driver integration, and math calculations.
+* `include/settings.h` & `src/settings.cpp`: NVS configuration storage and retrieval manager via Preferences.
+* `include/tamper.h` & `src/tamper.cpp`: Capacitive touch baseline calculation, threshold checks, and NVS latching.
+* `include/webui.h` & `src/webui.cpp`: SoftAP, HTTP server, REST endpoints, and embedded dashboard HTML/JS.
+* `src/main.cpp`: Setup routines, deep-sleep logic, wake interrupt service, and control loops.
+
+---
+
+## Build, Flash & Monitor
+
+### Compile Firmware
 ```bash
 pio run
 ```
 
-### Upload
-
+### Upload to ESP32
 ```bash
 pio run --target upload
 ```
 
-### Serial monitor
-
+### Serial Monitor (115200 Baud)
 ```bash
 pio device monitor
 ```
-
-Serial communication is configured for:
-
-```text
-115200 baud
-```
-
----
-
-# Important configuration
-
-Most hardware-dependent settings are in:
-
-```text
-include/config.h
-```
-
-Before deploying, verify:
-
-- I2C wiring
-- Button wiring and polarity
-- MPU6050 interrupt wiring
-- Battery-divider ratio
-- Tamper foil calibration
-- Motion sensitivity
-- Logging interval
-- Default Wi-Fi password
-- Buzzer behaviour
-
-The firmware currently uses the standard PlatformIO `default.csv` partition layout with LittleFS enabled.
-
----
-
-## Libraries
-
-The project uses the Arduino framework and the following libraries:
-
-- Adafruit SSD1306
-- Adafruit GFX Library
-- Adafruit BusIO
-- Adafruit Unified Sensor
-- Adafruit APDS9960
-- Adafruit BMP085 / BMP180
-- Adafruit MPU6050
-- ESP32 Preferences
-- ESP32 Wi-Fi / WebServer / DNSServer / mDNS
-- LittleFS
-
-The APDS9960, BMP085 and MPU6050 libraries are included under the project's `lib/` directory.
-
----
-
-## Notes
-
-- The firmware is specifically matched to the current pin assignments and hardware configuration documented above.
-- The APDS9960 is currently used only as an ambient-light sensor.
-- The device spends most of its time in ESP32 deep sleep during logging.
-- Thresholds and logging settings are stored in NVS.
-- Event data is stored locally in LittleFS and can be downloaded through the Web UI.
-- Time must currently be synchronised through the Web UI; there is no automatic NTP routine in the current firmware.
