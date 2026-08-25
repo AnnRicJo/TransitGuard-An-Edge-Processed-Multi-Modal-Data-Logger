@@ -181,8 +181,6 @@ static inline bool buttonIsPressed(uint8_t pin) {
  *  Wi-Fi Access Point (Web UI mode) defaults — overridable via web UI
  *  and stored in NVS afterwards.
  * ------------------------------------------------------------------- */
-#define DEFAULT_AP_SSID_PREFIX   "TransitLogger-"
-#define DEFAULT_AP_PASSWORD      "logger1234"   /* >= 8 chars, change me! */
 #define WEBSERVER_PORT           80
 
 /* ---------------------------------------------------------------------

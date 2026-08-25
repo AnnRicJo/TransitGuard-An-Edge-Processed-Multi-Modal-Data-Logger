@@ -1,8 +1,8 @@
 ---
 publishDate: 2026-08-25T00:00:00Z
-title: TransitGuard - Edge-Processed Multi-Modal Data Logger
+title: TransitGuard - An Edge-Processed Multi-Modal Data Logger
 excerpt: An intelligent, low-power transit logging system built with the MYOSA board to track shocks, environmental extremes, and tamper events during high-value cargo transport.
-image: cover-image.jpg
+image: /assets/images/transitguard/cover-image.jpg
 tags:
   - ESP32
   - MYOSA
@@ -10,6 +10,10 @@ tags:
   - Sensor-Fusion
   - Supply-Chain
 ---
+<p align="center">
+  <img src="/assets/images/transitguard/cover-image.jpg" width="800"><br/>
+  <i>TransitGuard: Edge-Processed Multi-Modal Data Logger for High-Value Cargo Monitoring</i>
+</p>
 
 > TransitGuard provides an immutable, timestamped audit trail of high-value cargo during transit using edge computing and multi-modal sensor fusion.
 
@@ -32,48 +36,50 @@ TransitGuard is a compact, battery-powered smart logger that leverages edge comp
 
 ## Demo / Examples
 
-### **Images**
-#### Hardware Assembly
+### **Hardware Assembly & Schematics**
 
-The following images show the progressive assembly of the TransitGuard enclosure, from the initial hardware integration to the completed package-ready unit.
-
-### 1. Full Assembly
+The following images show the circuit design and progressive assembly of the TransitGuard enclosure, from initial module testing to the fully integrated package.
 
 <p align="center">
-  <img src="/assets/images/full_pack.jpg" width="450"><br/>
-  <i>TransitGuard fully assembled within the protective transport enclosure</i>
-</p>
-
-### 3. Internal Electronics
-
-<p align="center">
-  <img src="/assets/images/internals.jpg" width="450"><br/>
-  <i>Internal arrangement of the TransitGuard sensing, processing, and power electronics</i>
-</p>
-
-### 4. Lid Open
-
-<p align="center">
-  <img src="/assets/images/lid_open.jpg" width="450"><br/>
-  <i>TransitGuard enclosure opened to expose the internal electronics and sensor assembly</i>
-</p>
-
-### 5. Quarter Assembly
-
-<p align="center">
-  <img src="https://github.com/AnnRicJo/TransitGuard-An-Edge-Processed-Multi-Modal-Data-Logger/blob/main/assets/images/quarter%20assembly.jpg" width="450"><br/>
-  <i>Early-stage enclosure assembly showing the integration of the TransitGuard hardware</i>
-</p>
-
-
-<p align="center">
-  <img src="/assets/images/transitguard/hardware-setup.jpg" width="800"><br/>
-  <i>TransitGuard hardware mounted inside the protective transport package</i>
+  <img src="/assets/images/circuit-diagram.jpeg" width="800"><br/>
+  <i>Circuit schematic showing the MYOSA ESP32 board, T856-C power module, and sensor bus</i>
 </p>
 
 <p align="center">
-  <img src="/assets/images/transitguard/circuit-schematic.jpg" width="800"><br/>
-  <i>Circuit schematic showing the MYOSA board and T856-C</i>
+  <img src="/assets/images/internals.jpg" width="800"><br/>
+  <i>Bench test setup and wiring arrangement of the sensing suite and processing electronics</i>
+</p>
+
+<p align="center">
+  <img src="/assets/images/quarter-assembly.jpg" width="800"><br/>
+  <i>Initial enclosure fitment and modular wiring integration</i>
+</p>
+
+<p align="center">
+  <img src="/assets/images/half-assembly.jpg" width="800"><br/>
+  <i>Intermediate assembly of the hardware stack and battery inside the custom housing</i>
+</p>
+
+<p align="center">
+  <img src="/assets/images/lid-open.jpg" width="800"><br/>
+  <i>TransitGuard enclosure opened to reveal the integrated electronics and internal capacitive seal</i>
+</p>
+
+<p align="center">
+  <img src="/assets/images/full-pack.jpg" width="800"><br/>
+  <i>TransitGuard fully assembled and sealed within the protective transport enclosure</i>
+</p>
+
+### **Web UI & Telemetry Dashboard**
+
+<p align="center">
+  <img src="/assets/images/webui-one.jpeg" width="800"><br/>
+  <i>Onboard Web UI displaying live IMU readings, dynamic thresholds, and system health</i>
+</p>
+
+<p align="center">
+  <img src="/assets/images/webui-two.jpeg" width="800"><br/>
+  <i>Audit log management interface for downloading and parsing CSV telemetry records directly from LittleFS</i>
 </p>
 
 ### **Videos**
