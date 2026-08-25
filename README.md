@@ -2,7 +2,7 @@
 publishDate: 2026-08-25T00:00:00Z
 title: TransitGuard - An Edge-Processed Multi-Modal Data Logger
 excerpt: An intelligent, low-power transit logging system built with the MYOSA board to track shocks, environmental extremes, and tamper events during high-value cargo transport.
-image: /assets/images/transitguard/cover-image.jpg
+image: /assets/images/cover-image.jpg
 tags:
   - ESP32
   - MYOSA
@@ -11,7 +11,7 @@ tags:
   - Supply-Chain
 ---
 <p align="center">
-  <img src="/assets/images/transitguard/cover-image.jpeg" width="800"><br/>
+  <img src="/assets/images/cover-image.jpeg" width="800"><br/>
   <i>TransitGuard: Edge-Processed Multi-Modal Data Logger for High-Value Cargo Monitoring</i>
 </p>
 
