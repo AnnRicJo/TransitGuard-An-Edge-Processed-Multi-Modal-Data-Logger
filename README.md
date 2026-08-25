@@ -85,7 +85,7 @@ The following images show the circuit design and progressive assembly of the Tra
 ### **Videos**
 
 <video controls width="100%">
-  <source src="/transitguard-demo.mp4" type="video/mp4">
+  <source src="/assets/videos/transitguard-demo.mp4" type="video/mp4">
 </video>
 
 ## Features (Detailed)
