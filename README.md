@@ -11,7 +11,7 @@ tags:
   - Supply-Chain
 ---
 <p align="center">
-  <img src="/assets/images/transitguard/cover-image.jpg" width="800"><br/>
+  <img src="/assets/images/transitguard/cover-image.jpeg" width="800"><br/>
   <i>TransitGuard: Edge-Processed Multi-Modal Data Logger for High-Value Cargo Monitoring</i>
 </p>
 
