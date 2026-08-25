@@ -73,12 +73,12 @@ The following images show the circuit design and progressive assembly of the Tra
 ### **Web UI & Telemetry Dashboard**
 
 <p align="center">
-  <img src="/assets/images/webui-one.jpeg" width="800"><br/>
+  <img src="/assets/images/webui-two.jpeg" width="800"><br/>
   <i>Onboard Web UI displaying live IMU readings, dynamic thresholds, and system health</i>
 </p>
 
 <p align="center">
-  <img src="/assets/images/webui-two.jpeg" width="800"><br/>
+  <img src="/assets/images/webui-one.jpeg" width="800"><br/>
   <i>Audit log management interface for downloading and parsing CSV telemetry records directly from LittleFS</i>
 </p>
 
